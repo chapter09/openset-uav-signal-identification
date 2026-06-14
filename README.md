@@ -55,6 +55,98 @@ prediction = model.predict(splits["test"][0])
 print(prediction.outcome, prediction.label, prediction.energy)
 ```
 
+## GE-OSR Reproduction
+
+The paper implementation is reproduced in `openset_uav_sim.geosr` as an optional PyTorch module:
+
+- Frequency-Conditioned Temporal Modulation (FCTM)
+- parallel Convolutional-Transformer hybrid blocks (CTBlocks)
+- learnable unit-normalized class embeddings
+- Dual-Constraint Embedding Loss (DCEL)
+- Free Energy Alignment Loss (FEAL)
+- EMA adaptive energy thresholding
+
+Install the optional training dependency:
+
+```bash
+python -m pip install -e '.[torch]'
+```
+
+Train GE-OSR directly against simulated open-set splits:
+
+```bash
+openset-uav-sim train-geosr --epochs 20 --seed 2026
+```
+
+The default GE-OSR hyperparameters follow Table 1 of Long et al. 2026:
+
+```text
+alpha=32, delta=0.1, T=10.0, E0=-0.1, lambda1=0.3,
+lambda2=1.0, beta=0.2, batch_size=128, optimizer=AdamW,
+learning_rate=0.001
+```
+
+In the original paper, only known UAV classes are trained and unknown UAV classes are withheld. In this simulator, the same open-set rule is preserved while the known semantic set is expanded to include known UAV IDs, known non-UAV emitters, and background/noise.
+
+## CageDroneRF Integration
+
+The simulator can import real CageDroneRF/U-RAPTOR raw recordings into the same `Segment` format used by synthetic data and GE-OSR. The public toolkit describes CageDroneRF raw recordings as `.dat` files containing `complex64` I/Q samples, with filename metadata such as manufacturer, model, bandwidth, center frequency, and operation mode.
+
+After you receive/download the CageDroneRF data, convert it into simulator splits:
+
+```bash
+openset-uav-sim import-cagedronerf \
+  --raw-root /path/to/CageDroneRF/raw \
+  --output data/cagedronerf \
+  --unknown-label DJI_Mavic3 \
+  --unknown-label Autel_EVO \
+  --max-segments-per-label 200
+```
+
+If you used their processing script and have a `meta_data.json`, pass it too:
+
+```bash
+openset-uav-sim import-cagedronerf \
+  --raw-root /path/to/CageDroneRF/raw \
+  --metadata /path/to/CageDroneRF/processed/meta_data.json \
+  --output data/cagedronerf
+```
+
+Mapping rules:
+
+- Drone labels become `known_uav_id`.
+- Labels passed with `--unknown-label` become `unknown_uav_cluster` and are withheld from train/validation splits.
+- `non-drone/` recordings become `known_non_uav_emitter`.
+- Labels or modes containing `NoDrone`, `background`, or `noise` become `true_background_noise`.
+
+To train GE-OSR on CageDroneRF and write evaluation tables/figures:
+
+```bash
+openset-uav-sim evaluate-geosr-cagedronerf \
+  --raw-root /path/to/CageDroneRF/raw \
+  --report-dir reports/geosr-cagedronerf \
+  --unknown-label DJI_Mavic3 \
+  --unknown-label Autel_EVO \
+  --epochs 20 \
+  --max-segments-per-label 200
+```
+
+The report directory contains:
+
+```text
+metrics_summary.md
+metrics_summary.csv
+per_label_metrics.md
+per_label_metrics.csv
+metrics.json
+roc_curve.svg
+oscr_curve.svg
+energy_histogram.svg
+confusion_matrix.svg
+training_history.json
+run_config.json
+```
+
 ## Core Assumptions
 
 Each segment is a complex baseband I/Q vector with metadata:
